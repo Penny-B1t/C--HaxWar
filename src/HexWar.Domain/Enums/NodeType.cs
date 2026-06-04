@@ -19,3 +19,22 @@ public enum NodeType
 ├── 고정 수비대는 점유권 계산에 포함됨
 ├── 노드 재점령 시 고정 수비대는 소멸 후 새 주인에게 재생성
 └── 일반 유닛과 별도로 표시되어야 함 */
+
+/*
+노드 N3 "동부 교차로" (SupplyLine)
+
+1. Player A가 N3 점령 (유닛 2기로)
+   → NodeOwnership: PlayerA
+   → PlayerA.GarrisonCount: 1 (자동 생성)
+   → PlayerA.TotalCount: 3 (2 mobile + 1 garrison)
+
+2. Player B가 N3 공격 (유닛 3기로)
+   → PlayerA.TotalCount: 3
+   → PlayerB.MobileCount: 3
+   → 동점 → Contested (PlayerB가 점령하려면 4기 필요)
+
+3. Player B가 4기로 재공격
+   → PlayerA.GarrisonCount: 0 (소멸)
+   → PlayerB.GarrisonCount: 1 (새로 생성)
+   → NodeOwnership: PlayerB
+*/

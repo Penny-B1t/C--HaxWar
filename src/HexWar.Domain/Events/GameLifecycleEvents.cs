@@ -65,18 +65,22 @@ public sealed record RoundResolved : DomainEvent
     /// <summary>변경된 노드 점유 상태</summary>
     public IReadOnlyList<NodeOwnershipChanged> OwnershipChanges { get; init; }
 
+    public IReadOnlyList<MoveExecutionRecord> MoveExecutions { get; init; }
+
     public RoundResolved(
         string roomId,
         int completedRound,
         IEnumerable<ArrivalRecord> arrivals,
         IEnumerable<EncounterOccurred> encounters,
-        IEnumerable<NodeOwnershipChanged> ownershipChanges)
+        IEnumerable<NodeOwnershipChanged> ownershipChanges,
+        IEnumerable<MoveExecutionRecord> moveExecutions)  // ← 추가
         : base(roomId)
     {
         CompletedRound = completedRound;
         Arrivals = arrivals.ToList().AsReadOnly();
         Encounters = encounters.ToList().AsReadOnly();
         OwnershipChanges = ownershipChanges.ToList().AsReadOnly();
+        MoveExecutions = moveExecutions.ToList().AsReadOnly();
     }
 }
 

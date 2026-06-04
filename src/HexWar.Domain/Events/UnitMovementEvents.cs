@@ -177,3 +177,45 @@ public sealed record UnitsAdvanced : DomainEvent
         RoundNumber = roundNumber;
     }
 }
+
+// 본부 점유 중인 경우 조건부 제공 정보 
+public sealed record UnitsArrivedSummary : DomainEvent
+{
+    public NodeId DestinationNode { get; init; }
+    public PlayerSide Side { get; init; }
+    public int UnitCount { get; init; }
+    public int RoundNumber { get; init; }
+
+    public UnitsArrivedSummary(
+        string roomId,
+        NodeId destinationNode,
+        PlayerSide side,
+        int unitCount,
+        int roundNumber)
+        : base(roomId)
+    {
+        DestinationNode = destinationNode;
+        Side = side;
+        UnitCount = unitCount;
+        RoundNumber = roundNumber;
+    }
+}
+
+public sealed record MoveExecutionRecord
+{
+    public NodeId FromNode { get; init; }
+
+    public NodeId ToNode { get; init; }
+
+    public PlayerSide Side { get; init; }
+
+    public int UnitCount { get; init; }
+
+    public MoveExecutionRecord(NodeId fromNode, NodeId toNode, PlayerSide side, int unitCount)
+    {
+        FromNode = fromNode;
+        ToNode = toNode;
+        Side = side;
+        UnitCount = unitCount;
+    }
+}
