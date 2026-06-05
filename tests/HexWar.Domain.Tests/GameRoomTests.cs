@@ -1,8 +1,8 @@
 using System.Collections.Generic;
+using HexWar.Domain.Commands;
 using HexWar.Domain.Entities;
 using HexWar.Domain.Enums;
 using HexWar.Domain.ValueObjects;
-using HexWar.Domain.Commands;
 using Xunit;
 
 namespace HexWar.Domain.Tests;
@@ -34,13 +34,18 @@ public class GameRoomTests
         _room.AddPlayer(new PlayerId("p2"));
         // 현재 Phase: Planning
 
-        var cmd = new MoveCommand(new NodeId(1), new NodeId(2), 2);
+        var cmd = new MoveCommand(new NodeId(1), new NodeId(4), 2);
         _room.MoveUnits(PlayerSide.A, cmd);
 
-        Assert.Equal(1, _room.Nodes[new NodeId(1)].GetTotalCount(PlayerSide.A));
+        // Planning 단계에서는 아직 차감 및 이동이 시작되지 않음
+        Assert.Equal(3, _room.Nodes[new NodeId(1)].GetTotalCount(PlayerSide.A));
         Assert.Equal(2, _room.UnitUsedThisRound[PlayerSide.A]);
 
-        var edgeId = new EdgeId(new NodeId(1), new NodeId(2));
+        // ResolveRound 실행 후 실제 이동 발생
+        _room.ResolveRound();
+
+        Assert.Equal(1, _room.Nodes[new NodeId(1)].GetTotalCount(PlayerSide.A));
+        var edgeId = new EdgeId(new NodeId(1), new NodeId(4));
         Assert.NotEmpty(_room.Edges[edgeId].TravelingUnits);
     }
 

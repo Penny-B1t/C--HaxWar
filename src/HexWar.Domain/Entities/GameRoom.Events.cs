@@ -16,6 +16,8 @@ public partial class GameRoom
     private List<ArrivalRecord> _arrivalRecords = new();
     private List<MoveExecutionRecord> _moveExecutionRecords = new();
 
+
+
     private void RaiseEvent(IDomainEvent domainEvent)
     {
         _domainEvents.Add(domainEvent);
