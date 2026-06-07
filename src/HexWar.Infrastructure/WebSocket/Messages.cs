@@ -30,6 +30,9 @@ public class ServerMessage
     [JsonPropertyName("round")]
     public int? Round { get; set; }
 
+    [JsonPropertyName("sequence")]
+    public long SequenceNumber { get; set; }
+
     public static ServerMessage FromDomainEvent(IDomainEvent domainEvent, string roomId, int currentRound)
     {
         return new ServerMessage
@@ -42,7 +45,20 @@ public class ServerMessage
         };
     }
 
-    public static ServerMessage FromDto<T>(T dto, string eventType, int? currentRound = null)
+    public static ServerMessage FromDomainEvent(IDomainEvent domainEvent, string _, int currentRound, long sequenceNumber)
+    {
+        return new ServerMessage
+        {
+            Type = "game_event",
+            EventType = domainEvent.GetType().Name,
+            Payload = domainEvent,
+            Timestamp = DateTime.UtcNow,
+            Round = currentRound,
+            SequenceNumber = sequenceNumber  // ← 추가
+        };
+    }
+
+    public static ServerMessage FromDto<T>(T dto, string eventType, int? currentRound = null, long sequenceNumber = 0)
     {
         return new ServerMessage
         {
@@ -50,7 +66,8 @@ public class ServerMessage
             EventType = eventType,
             Payload = dto,
             Timestamp = DateTime.UtcNow,
-            Round = currentRound
+            Round = currentRound,
+            SequenceNumber = sequenceNumber
         };
     }
 }
@@ -62,6 +79,7 @@ public static class ClientMessageTypes
     public const string EncounterDecision = "encounter_decision";
     public const string GetState = "get_state";
     public const string Ping = "ping";
+    public const string ReconnectSync = "reconnect_sync";
 }
 
 public static class ServerMessageTypes
@@ -94,6 +112,12 @@ public class EncounterDecisionPayload
 
     [JsonPropertyName("decision")]
     public string Decision { get; set; } = string.Empty;
+}
+
+public class ReconnectSyncPayload
+{
+    [JsonPropertyName("last_seen_sequence")]
+    public long LastSeenSequence { get; set; }
 }
 
 public static class JsonOptions

@@ -24,40 +24,40 @@ public class InMemoryEventBroadcaster : IEventBroadcaster
     }
 
     /// <inheritdoc />
-    public async Task BroadcastToRoomAsync(string roomId, IDomainEvent domainEvent)
+    public async Task BroadcastToRoomAsync(string roomId, IDomainEvent domainEvent, long sequenceNumber = 0)
     {
         var serverMessage = ServerMessage.FromDomainEvent(
-            domainEvent, roomId, _getCurrentRound(roomId));
+            domainEvent, roomId, _getCurrentRound(roomId), sequenceNumber);
 
         var json = JsonSerializer.Serialize(serverMessage, JsonOptions.Default);
         await _connectionManager.BroadcastToRoomAsync(roomId, json);
     }
 
     /// <inheritdoc />
-    public async Task BroadcastToRoomAsync<T>(string roomId, T message) where T : class
+    public async Task BroadcastToRoomAsync<T>(string roomId, T message, long sequenceNumber = 0) where T : class
     {
         var eventType = typeof(T).Name;
-        var serverMessage = ServerMessage.FromDto(message, eventType, _getCurrentRound(roomId));
+        var serverMessage = ServerMessage.FromDto(message, eventType, _getCurrentRound(roomId), sequenceNumber);
 
         var json = JsonSerializer.Serialize(serverMessage, JsonOptions.Default);
         await _connectionManager.BroadcastToRoomAsync(roomId, json);
     }
 
     /// <inheritdoc />
-    public async Task SendToPlayerAsync(string roomId, PlayerSide side, IDomainEvent domainEvent)
+    public async Task SendToPlayerAsync(string roomId, PlayerSide side, IDomainEvent domainEvent, long sequenceNumber = 0)
     {
         var serverMessage = ServerMessage.FromDomainEvent(
-            domainEvent, roomId, _getCurrentRound(roomId));
+            domainEvent, roomId, _getCurrentRound(roomId), sequenceNumber);
 
         var json = JsonSerializer.Serialize(serverMessage, JsonOptions.Default);
         await _connectionManager.SendToPlayerAsync(roomId, side.ToString(), json);
     }
 
     /// <inheritdoc />
-    public async Task SendToPlayerAsync<T>(string roomId, PlayerSide side, T message) where T : class
+    public async Task SendToPlayerAsync<T>(string roomId, PlayerSide side, T message, long sequenceNumber = 0) where T : class
     {
         var eventType = typeof(T).Name;
-        var serverMessage = ServerMessage.FromDto(message, eventType, _getCurrentRound(roomId));
+        var serverMessage = ServerMessage.FromDto(message, eventType, _getCurrentRound(roomId), sequenceNumber);
 
         var json = JsonSerializer.Serialize(serverMessage, JsonOptions.Default);
         await _connectionManager.SendToPlayerAsync(roomId, side.ToString(), json);

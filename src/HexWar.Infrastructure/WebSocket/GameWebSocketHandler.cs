@@ -8,6 +8,7 @@ using HexWar.Application.Sessions;
 using HexWar.Domain.Commands;
 using HexWar.Domain.Enums;
 using HexWar.Domain.ValueObjects;
+using Microsoft.Extensions.Logging;
 
 /// <summary>
 /// WebSocket 연결을 처리하고 GameSession으로 명령을 전달합니다.
@@ -16,11 +17,13 @@ public class GameWebSocketHandler
 {
     private readonly ConnectionManager _connectionManager;
     private readonly SessionRegistry _sessionRegistry;
+    private readonly ILogger<GameWebSocketHandler> _logger;
 
-    public GameWebSocketHandler(ConnectionManager connectionManager, SessionRegistry sessionRegistry)
+    public GameWebSocketHandler(ConnectionManager connectionManager, SessionRegistry sessionRegistry, ILogger<GameWebSocketHandler> logger)
     {
         _connectionManager = connectionManager;
         _sessionRegistry = sessionRegistry;
+        _logger = logger;
     }
 
     /// <summary>
@@ -105,6 +108,7 @@ public class GameWebSocketHandler
         PlayerSide side,
         string rawMessage)
     {
+        _logger.LogInformation("[WS] Received from Room={RoomId}, Player={Side}: {Message}", session.RoomId, side, rawMessage);
         try
         {
             var clientMessage = JsonSerializer.Deserialize<ClientMessage>(
@@ -132,6 +136,10 @@ public class GameWebSocketHandler
 
                 case ClientMessageTypes.Ping:
                     await SendPongAsync(webSocket);
+                    break;
+
+                case ClientMessageTypes.ReconnectSync:
+                    await HandleReconnectSyncAsync(webSocket, session, side, clientMessage.Payload);
                     break;
 
                 default:
@@ -179,6 +187,10 @@ public class GameWebSocketHandler
         {
             await SendErrorAsync(webSocket, result.ErrorMessage ?? "Move failed", result.ErrorCode);
         }
+        else
+        {
+            await BroadcastStateAsync(session);
+        }
     }
 
     private async Task HandleEncounterDecisionAsync(
@@ -212,6 +224,10 @@ public class GameWebSocketHandler
         {
             await SendErrorAsync(webSocket, result.ErrorMessage ?? "Decision failed", result.ErrorCode);
         }
+        else
+        {
+            await BroadcastStateAsync(session);
+        }
     }
 
     private async Task HandleGetStateAsync(
@@ -234,6 +250,29 @@ public class GameWebSocketHandler
         await SendTextAsync(webSocket, json);
     }
 
+    private async Task BroadcastStateAsync(GameSession session)
+    {
+        foreach (var side in new[] { PlayerSide.A, PlayerSide.B })
+        {
+            var socket = _connectionManager.GetConnection(session.RoomId, side.ToString());
+            if (socket != null && socket.State == WebSocketState.Open)
+            {
+                var stateView = session.GetGameStateForPlayer(side);
+                var serverMessage = new ServerMessage
+                {
+                    Type = ServerMessageTypes.StateUpdate,
+                    EventType = "GameState",
+                    Payload = stateView,
+                    Timestamp = DateTime.UtcNow,
+                    Round = session.CurrentRound
+                };
+
+                var json = JsonSerializer.Serialize(serverMessage, JsonOptions.Default);
+                await SendTextAsync(socket, json);
+            }
+        }
+    }
+
     // ========================================================================
     // 응답 헬퍼
     // ========================================================================
@@ -241,6 +280,8 @@ public class GameWebSocketHandler
     private async Task SendTextAsync(System.Net.WebSockets.WebSocket webSocket, string message)
     {
         if (webSocket.State != WebSocketState.Open) return;
+
+        _logger.LogInformation("[WS] Sending: {Message}", message);
 
         var buffer = Encoding.UTF8.GetBytes(message);
         await webSocket.SendAsync(
@@ -274,5 +315,44 @@ public class GameWebSocketHandler
 
         var json = JsonSerializer.Serialize(pongMessage, JsonOptions.Default);
         await SendTextAsync(webSocket, json);
+    }
+
+    private async Task HandleReconnectSyncAsync(
+    WebSocket webSocket, GameSession session, PlayerSide side, JsonElement payload)
+    {
+        var syncPayload = JsonSerializer.Deserialize<ReconnectSyncPayload>(
+            payload.GetRawText(), JsonOptions.Default);
+
+        if (syncPayload == null) return;
+
+        // 누락된 이벤트 전송
+        var missedEvents = session.GetEventsAfter(syncPayload.LastSeenSequence);
+
+        foreach (var buffered in missedEvents)
+        {
+            var message = new ServerMessage
+            {
+                Type = "game_event",
+                EventType = buffered.Event.GetType().Name,
+                Payload = buffered.Event,
+                SequenceNumber = buffered.SequenceNumber,
+                Timestamp = buffered.Timestamp
+            };
+            var json = JsonSerializer.Serialize(message, JsonOptions.Default);
+            await SendTextAsync(webSocket, json);
+        }
+
+        // 현재 상태도 전송
+        var stateView = session.GetGameStateForPlayer(side);
+        var stateMessage = new ServerMessage
+        {
+            Type = "state_update",
+            EventType = "GameState",
+            Payload = stateView,
+            Timestamp = DateTime.UtcNow,
+            Round = session.CurrentRound
+        };
+        var stateJson = JsonSerializer.Serialize(stateMessage, JsonOptions.Default);
+        await SendTextAsync(webSocket, stateJson);
     }
 }
