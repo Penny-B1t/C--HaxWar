@@ -12,6 +12,14 @@ class GameUI {
         this.selectedUnits = 0;
         this.pendingMoves = [];
         this.encounterData = null;
+        this.optimisticMoves = []; // 서버 확인 전 로컬 임시 이동 데이터 보관
+
+        // 라운드 타이머 관련 상태
+        this.timerInterval = null;
+        this.timeRemaining = 0;
+        this.lastPhase = null;
+        this.lastRound = null;
+        this.isMyPlanningComplete = false;
     }
 
     initialize() {
@@ -94,30 +102,88 @@ class GameUI {
     }
 
     handleStateUpdate(state) {
-        this.stateView = state;
-        this.renderer.updateState(state);
+        // 1. 낙관적 UI 업데이트 목록 보정 (이미 서버에 도달했거나 3초가 지난 경우 제거)
+        const now = Date.now();
+        this.optimisticMoves = this.optimisticMoves.filter(optMove => {
+            const confirmed = state.myPendingMoves && state.myPendingMoves.some(
+                m => m.fromNodeId === optMove.fromNodeId &&
+                     m.toNodeId === optMove.toNodeId &&
+                     m.unitCount === optMove.unitCount
+            );
+            return !confirmed && (now - optMove.timestamp < 3000);
+        });
+
+        // 2. 서버 상태 복사 및 낙관적 데이터 합성
+        const localState = JSON.parse(JSON.stringify(state));
+
+        // 3. 낙관적 이동 사항을 로컬 상태에 반영
+        this.optimisticMoves.forEach(optMove => {
+            localState.myRemainingUnits = Math.max(0, localState.myRemainingUnits - optMove.unitCount);
+
+            const fromNode = localState.nodes.find(n => n.id === optMove.fromNodeId);
+            if (fromNode && fromNode.myUnits) {
+                fromNode.myUnits.mobile = Math.max(0, fromNode.myUnits.mobile - optMove.unitCount);
+                fromNode.myUnits.total = Math.max(0, fromNode.myUnits.total - optMove.unitCount);
+            }
+
+            if (!localState.myPendingMoves) {
+                localState.myPendingMoves = [];
+            }
+            localState.myPendingMoves.push(optMove);
+        });
+
+        localState.isMyPlanningComplete = (localState.myRemainingUnits <= 0) || 
+            (localState.nodes && localState.nodes.reduce((sum, n) => sum + (n.myUnits?.mobile || 0), 0) <= 0);
+
+        this.stateView = state; 
+        this.isMyPlanningComplete = localState.isMyPlanningComplete;
+        this.renderer.updateState(localState); 
 
         // 라운드 정보 업데이트
-        document.getElementById('round-info').textContent = `라운드 ${state.currentRound}`;
+        const maxRounds = localState.maxRounds || 20;
+        document.getElementById('round-info').textContent = `라운드 ${localState.currentRound} / ${maxRounds}`;
         document.getElementById('phase-info').textContent =
-            state.phase === 'Planning' ? '📋 계획 단계' : '⚡ 해소 단계';
+            localState.phase === 'Planning' ? '📋 계획 단계' : '⚡ 해소 단계';
+
+        // 타이머 상태 관리 및 카운트다운 시작/종료
+        const phaseChanged = this.lastPhase !== localState.phase;
+        const roundChanged = this.lastRound !== localState.currentRound;
+
+        this.lastPhase = localState.phase;
+        this.lastRound = localState.currentRound;
+
+        if (localState.phase === 'Planning') {
+            if (roundChanged || phaseChanged || !this.timerInterval) {
+                this.startCountdown(30);
+            } else {
+                this.updateTimerDisplay();
+            }
+        } else {
+            this.stopCountdown();
+            const timerEl = document.getElementById('timer-display');
+            if (timerEl) {
+                timerEl.textContent = '⏱️ 해소 단계 진행 중...';
+                timerEl.style.color = '#a78bfa'; // Purple/Violet
+                timerEl.classList.remove('urgent');
+            }
+        }
 
         // 점수 업데이트
-        if (state.scores) {
-            document.getElementById('score-a').textContent = `A: ${state.scores.A || 0}`;
-            document.getElementById('score-b').textContent = `B: ${state.scores.B || 0}`;
+        if (localState.scores) {
+            document.getElementById('score-a').textContent = `A: ${localState.scores.A || 0}`;
+            document.getElementById('score-b').textContent = `B: ${localState.scores.B || 0}`;
         }
 
         // 이동 가능 유닛 수
-        const remaining = state.myRemainingUnits || 0;
+        const remaining = localState.myRemainingUnits || 0;
         document.getElementById('available-units').textContent = remaining;
 
         // 내 Planning 완료 상태
-        if (state.isMyPlanningComplete) {
+        if (localState.isMyPlanningComplete) {
             document.getElementById('phase-info').textContent = '✅ 명령 완료 (상대 기다리는 중)';
         }
 
-        // 유닛 선택 버튼의 활성화/비활성화 처리 (전체 남은 이동 가능 수 기준)
+        // 유닛 선택 버튼의 활성화/비활성화 처리
         document.querySelectorAll('.unit-btn').forEach(btn => {
             const btnCount = parseInt(btn.dataset.count);
             if (btnCount > remaining) {
@@ -142,7 +208,7 @@ class GameUI {
         const pendingMovesEl = document.getElementById('pending-moves');
         if (pendingMovesEl) {
             pendingMovesEl.innerHTML = '';
-            if (state.myPendingMoves && state.myPendingMoves.length > 0) {
+            if (localState.myPendingMoves && localState.myPendingMoves.length > 0) {
                 const header = document.createElement('div');
                 header.style.fontWeight = 'bold';
                 header.style.margin = '10px 0 5px 0';
@@ -151,15 +217,20 @@ class GameUI {
                 header.textContent = '📍 현재 라운드 이동 예약 목록';
                 pendingMovesEl.appendChild(header);
 
-                state.myPendingMoves.forEach(move => {
+                localState.myPendingMoves.forEach(move => {
                     const moveItem = document.createElement('div');
                     moveItem.style.display = 'flex';
                     moveItem.style.justifyContent = 'space-between';
                     moveItem.style.alignItems = 'center';
                     moveItem.style.padding = '6px 10px';
                     moveItem.style.margin = '5px 0';
-                    moveItem.style.backgroundColor = 'rgba(56, 189, 248, 0.08)';
-                    moveItem.style.border = '1px solid rgba(56, 189, 248, 0.15)';
+                    if (move.isOptimistic) {
+                        moveItem.style.backgroundColor = 'rgba(96, 165, 250, 0.08)';
+                        moveItem.style.border = '1px dashed rgba(96, 165, 250, 0.3)';
+                    } else {
+                        moveItem.style.backgroundColor = 'rgba(56, 189, 248, 0.08)';
+                        moveItem.style.border = '1px solid rgba(56, 189, 248, 0.15)';
+                    }
                     moveItem.style.borderRadius = '6px';
                     moveItem.style.fontSize = '0.85em';
 
@@ -167,8 +238,10 @@ class GameUI {
                     const toName = GameRenderer.NODE_POSITIONS[move.toNodeId]?.name || `노드 ${move.toNodeId}`;
 
                     moveItem.innerHTML = `
-                        <span>${fromName} ➔ ${toName}</span>
-                        <span style="font-weight: bold; color: #38bdf8;">${move.unitCount}기</span>
+                        <span style="${move.isOptimistic ? 'opacity: 0.7;' : ''}">${fromName} ➔ ${toName}</span>
+                        <span style="font-weight: bold; color: ${move.isOptimistic ? '#60a5fa' : '#38bdf8'};">
+                            ${move.unitCount}기 ${move.isOptimistic ? '<span style="font-size:0.8em; font-weight:normal; opacity:0.8;">(전송중...)</span>' : ''}
+                        </span>
                     `;
                     pendingMovesEl.appendChild(moveItem);
                 });
@@ -176,8 +249,8 @@ class GameUI {
         }
 
         // 미결정 조우 하이라이트
-        if (state.undecidedEncounterEdgeIds && state.undecidedEncounterEdgeIds.length > 0) {
-            this.highlightUndecidedEncounters(state.undecidedEncounterEdgeIds);
+        if (localState.undecidedEncounterEdgeIds && localState.undecidedEncounterEdgeIds.length > 0) {
+            this.highlightUndecidedEncounters(localState.undecidedEncounterEdgeIds);
         }
     }
 
@@ -190,7 +263,9 @@ class GameUI {
         if (!this.selectedFrom) {
             // 출발지 선택
             const node = this.stateView.nodes.find(n => n.id === nodeId);
-            if (!node || !node.isOwnedByMe) return;
+            if (!node) return;
+            const canSelect = node.isOwnedByMe || (node.ownership?.toLowerCase() === 'contested' && (node.myUnits?.mobile || 0) > 0);
+            if (!canSelect) return;
 
             // 이미 이번 라운드에 출발지 노드에서 보내기로 한 예약을 감안하여 남은 유닛 수 계산
             const alreadyCommitted = this.stateView.myPendingMoves
@@ -278,7 +353,25 @@ class GameUI {
     executeMoveTo(toNode) {
         if (!this.selectedFrom || this.selectedUnits <= 0) return;
 
-        this.client.moveUnits(this.selectedFrom, toNode, this.selectedUnits);
+        const fromNode = this.selectedFrom;
+        const count = this.selectedUnits;
+
+        // 낙관적 UI 정보 기록
+        this.optimisticMoves.push({
+            fromNodeId: fromNode,
+            toNodeId: toNode,
+            unitCount: count,
+            isOptimistic: true,
+            timestamp: Date.now()
+        });
+
+        // 서버 전송
+        this.client.moveUnits(fromNode, toNode, count);
+
+        // 즉시 로컬 갱신하여 UI 반영
+        if (this.stateView) {
+            this.handleStateUpdate(this.stateView);
+        }
 
         // UI 초기화
         this.selectedFrom = null;
@@ -323,6 +416,14 @@ class GameUI {
     }
 
     handleGameOver(data) {
+        this.stopCountdown();
+        const timerEl = document.getElementById('timer-display');
+        if (timerEl) {
+            timerEl.textContent = '⏱️ 게임 종료';
+            timerEl.style.color = '#9ca3af'; // Gray
+            timerEl.classList.remove('urgent');
+        }
+
         const overlay = document.getElementById('gameover-overlay');
         overlay.style.display = 'flex';
 
@@ -334,6 +435,56 @@ class GameUI {
                 `승자: ${data.winner}측`;
         } else {
             document.getElementById('gameover-title').textContent = '🤝 무승부';
+        }
+    }
+
+    startCountdown(seconds) {
+        this.stopCountdown();
+        this.timeRemaining = seconds;
+        this.updateTimerDisplay();
+
+        this.timerInterval = setInterval(() => {
+            this.timeRemaining--;
+            if (this.timeRemaining <= 0) {
+                this.stopCountdown();
+                const timerEl = document.getElementById('timer-display');
+                if (timerEl) {
+                    timerEl.textContent = '⏱️ 시간 초과 (대기 중)';
+                    timerEl.style.color = '#f87171'; // Red
+                    timerEl.classList.remove('urgent');
+                }
+            } else {
+                this.updateTimerDisplay();
+            }
+        }, 1000);
+    }
+
+    stopCountdown() {
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+    }
+
+    updateTimerDisplay() {
+        const timerEl = document.getElementById('timer-display');
+        if (!timerEl) return;
+
+        if (this.isMyPlanningComplete) {
+            timerEl.textContent = `⏱️ ${this.timeRemaining}초 (대기 중)`;
+            timerEl.style.color = '#34d399'; // Green
+            timerEl.classList.remove('urgent');
+            return;
+        }
+
+        if (this.timeRemaining <= 5) {
+            timerEl.textContent = `⏱️ ${this.timeRemaining}초 남음 - 서두르세요!`;
+            timerEl.style.color = '#ef4444'; // Red
+            timerEl.classList.add('urgent');
+        } else {
+            timerEl.textContent = `⏱️ ${this.timeRemaining}초 남음`;
+            timerEl.style.color = '#fbbf24'; // Yellow/Orange
+            timerEl.classList.remove('urgent');
         }
     }
 

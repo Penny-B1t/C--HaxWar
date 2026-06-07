@@ -139,6 +139,13 @@ class GameRenderer {
             if (node.isHeadquarters) nodeEl.circle.classList.add('headquarters');
             if (node.isSupplyLine) nodeEl.circle.classList.add('supplyline');
 
+            // 아군/적군 진지 명확히 구분 (.mine / .opponent)
+            if (node.isOwnedByMe) {
+                nodeEl.circle.classList.add('mine');
+            } else if (node.ownership !== 'Neutral' && node.ownership !== 'Contested') {
+                nodeEl.circle.classList.add('opponent');
+            }
+
             // 유닛 수 표시
             const myUnits = node.myUnits ? node.myUnits.total : 0;
             const enemyUnits = node.enemyUnits ? node.enemyUnits.totalCount : 0;
@@ -156,6 +163,58 @@ class GameRenderer {
                 nodeEl.circle.style.strokeDasharray = 'none';
             }
         });
+
+        // 계획 단계 예약된 이동 간선 하이라이트 및 화살표 표시
+        Object.values(this.edges).forEach(edgeEl => {
+            edgeEl.line.classList.remove('pending-move', 'optimistic');
+            if (edgeEl.pendingLabel) {
+                edgeEl.pendingLabel.remove();
+                edgeEl.pendingLabel = null;
+            }
+        });
+
+        if (stateView.myPendingMoves) {
+            stateView.myPendingMoves.forEach(move => {
+                const key = this.edges[`${move.fromNodeId}-${move.toNodeId}`]
+                    ? `${move.fromNodeId}-${move.toNodeId}`
+                    : `${move.toNodeId}-${move.fromNodeId}`;
+                const edgeEl = this.edges[key];
+                if (edgeEl) {
+                    edgeEl.line.classList.add('pending-move');
+                    if (move.isOptimistic) {
+                        edgeEl.line.classList.add('optimistic');
+                    }
+
+                    // 간선 중앙에 유닛 수 및 이동 방향 텍스트 렌더링
+                    const posStart = GameRenderer.NODE_POSITIONS[move.fromNodeId];
+                    const posEnd = GameRenderer.NODE_POSITIONS[move.toNodeId];
+                    const midX = (posStart.x + posEnd.x) / 2;
+                    const midY = (posStart.y + posEnd.y) / 2;
+
+                    // 이동 방향 계산
+                    const dx = posEnd.x - posStart.x;
+                    const dy = posEnd.y - posStart.y;
+                    let arrow = '➔';
+                    if (Math.abs(dx) > Math.abs(dy)) {
+                        arrow = dx > 0 ? '➔' : '◀';
+                    } else {
+                        arrow = dy > 0 ? '▼' : '▲';
+                    }
+
+                    const pendingLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    pendingLabel.setAttribute('x', midX);
+                    pendingLabel.setAttribute('y', midY + 12);
+                    pendingLabel.setAttribute('class', 'pending-edge-label');
+                    if (move.isOptimistic) {
+                        pendingLabel.classList.add('optimistic');
+                    }
+                    pendingLabel.textContent = `${arrow} ${move.unitCount}기`;
+
+                    this.svg.appendChild(pendingLabel);
+                    edgeEl.pendingLabel = pendingLabel;
+                }
+            });
+        }
 
         // 간선 업데이트
         if (stateView.edges) {
