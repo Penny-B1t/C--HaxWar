@@ -1,10 +1,11 @@
+using static HexWar.Domain.Entities.GameRoom;
 namespace HexWar.Benchmarks;
 
+using HexWar.Domain.Commands;
 using HexWar.Domain.Entities;
 using HexWar.Domain.Enums;
-using HexWar.Domain.ValueObjects;
-using HexWar.Domain.Commands;
 using HexWar.Domain.Exceptions;
+using HexWar.Domain.ValueObjects;
 
 /// <summary>
 /// 실제 게임과 동일한 제약 조건으로 게임을 시뮬레이션합니다.
@@ -17,7 +18,7 @@ using HexWar.Domain.Exceptions;
 public class RealisticGameSimulator
 {
     private readonly Random _random;
-    private readonly bool _verbose;
+    private readonly bool _verbose; // 플레이 처리 내용 출력 여부 
 
     public RealisticGameSimulator(int seed = 42, bool verbose = false)
     {
@@ -29,7 +30,7 @@ public class RealisticGameSimulator
     /// 하나의 완전한 게임을 시뮬레이션합니다.
     /// 게임 종료(승리 조건 or MaxRounds)까지 진행합니다.
     /// </summary>
-    public GameSimulationResult SimulateCompleteGame()
+    public GameSimulationResult SimulateCompleteGame(bool trackGC = false)
     {
         var room = new GameRoom($"sim-{Guid.NewGuid():N}");
         room.InitializeMap();
@@ -37,6 +38,7 @@ public class RealisticGameSimulator
         room.AddPlayer(new PlayerId("p2"));
 
         var roundSnapshots = new List<RoundSnapshot>();
+        var gcSnapshots = new List<GCSnapshot>(); // GC 상태 스샷 
         int encounterCount = 0;
         int totalMovesA = 0;
         int totalMovesB = 0;
@@ -47,6 +49,18 @@ public class RealisticGameSimulator
 
             // 라운드 시작 시점 상태 기록
             roundSnapshots.Add(CaptureSnapshot(room, round));
+
+            if (trackGC && round % 10 == 0)
+            {
+                gcSnapshots.Add(new GCSnapshot
+                {
+                    Round = round,
+                    Gen0 = GC.CollectionCount(0),
+                    Gen1 = GC.CollectionCount(1),
+                    Gen2 = GC.CollectionCount(2),
+                    TotalMemory = GC.GetTotalMemory(false)
+                });
+            }
 
             // 각 플레이어가 이동 (실제 게임처럼 유닛 3기까지)
             int movesA = SimulatePlayerTurn(room, PlayerSide.A);
@@ -76,7 +90,8 @@ public class RealisticGameSimulator
             TotalMovesB = totalMovesB,
             Winner = GetWinner(room),
             FinalScores = GetScores(room),
-            RoundSnapshots = roundSnapshots
+            RoundSnapshots = roundSnapshots,
+            GCSnapshots = gcSnapshots
         };
     }
 
@@ -253,6 +268,16 @@ public class GameSimulationResult
     public string Winner { get; set; } = "Unknown";
     public Dictionary<string, int> FinalScores { get; set; } = new();
     public List<RoundSnapshot> RoundSnapshots { get; set; } = new();
+    public List<GCSnapshot> GCSnapshots { get; set; } = new(); // 추가
+}
+
+public class GCSnapshot
+{
+    public int Round { get; set; }
+    public int Gen0 { get; set; }
+    public int Gen1 { get; set; }
+    public int Gen2 { get; set; }
+    public long TotalMemory { get; set; }
 }
 
 public class RoundSnapshot
